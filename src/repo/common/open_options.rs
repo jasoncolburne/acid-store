@@ -107,6 +107,7 @@ pub struct OpenOptions<'a> {
     config: RepoConfig,
     mode: OpenMode,
     password: Option<&'a [u8]>,
+    salt: Option<&'a [u8]>,
     instance: InstanceId,
     lock_context: &'a [u8],
     lock_handler: BoxLockHandler<'a>,
@@ -125,6 +126,7 @@ impl<'a> OpenOptions<'a> {
             config: RepoConfig::default(),
             mode: OpenMode::Open,
             password: None,
+            salt: None,
             instance: DEFAULT_INSTANCE,
             lock_context: &[],
             lock_handler: Box::new(|_| false),
@@ -219,6 +221,11 @@ impl<'a> OpenOptions<'a> {
     /// This is required when encryption is enabled for the repository.
     pub fn password(&mut self, password: &'a [u8]) -> &mut Self {
         self.password = Some(password);
+        self
+    }
+
+    pub fn salt(&mut self, salt: &'a [u8]) -> &mut Self {
+        self.salt = Some(salt);
         self
     }
 
@@ -421,7 +428,13 @@ impl<'a> OpenOptions<'a> {
         )?;
 
         let salt = match password {
-            Some(..) => KeySalt::generate(),
+            Some(..) => {
+                if let Some(salt) = self.salt {
+                    KeySalt(salt.to_vec())
+                } else {
+                    KeySalt::generate()
+                }
+            },
             None => KeySalt::empty(),
         };
 

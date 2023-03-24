@@ -142,7 +142,7 @@ impl Encryption {
 /// This type can be serialized to persistently store the salt.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct KeySalt(Vec<u8>);
+pub struct KeySalt(pub(crate) Vec<u8>);
 
 impl KeySalt {
     /// Generate a new empty `KeySalt`.
