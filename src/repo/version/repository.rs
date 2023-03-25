@@ -56,7 +56,7 @@ impl<K: Key> OpenRepo for VersionRepo<K> {
 
 impl<K: Key> VersionRepo<K> {
     pub fn destroy(&self) {
-        self.0.state().flush();
+        self.0.destroy();
     }
 
     /// Return whether the given `key` exists in this repository.
