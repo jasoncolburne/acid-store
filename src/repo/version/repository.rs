@@ -55,6 +55,11 @@ impl<K: Key> OpenRepo for VersionRepo<K> {
 }
 
 impl<K: Key> VersionRepo<K> {
+    pub fn destroy(&self) {
+        let state = self.0.state.write().unwrap();
+        state.store.lock().unwrap().flush();
+    }
+
     /// Return whether the given `key` exists in this repository.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
