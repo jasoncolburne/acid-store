@@ -5,28 +5,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "encryption")]
 use {
-    rand::rngs::OsRng,
-    rand::RngCore,
-    sodiumoxide::crypto::aead::xchacha20poly1305_ietf::{
-        gen_nonce, open, seal, Key as ChaChaKey, Nonce, KEYBYTES, NONCEBYTES,
-    },
-    sodiumoxide::crypto::pwhash::argon2id13::{
-        derive_key, gen_salt, MemLimit, OpsLimit, Salt, MEMLIMIT_INTERACTIVE, MEMLIMIT_MODERATE,
-        MEMLIMIT_SENSITIVE, OPSLIMIT_INTERACTIVE, OPSLIMIT_MODERATE, OPSLIMIT_SENSITIVE,
-    },
-    std::sync::Once,
+    rand::{rngs::OsRng, RngCore},
 };
-
-#[cfg(feature = "encryption")]
-static ENCRYPTION_INIT: Once = Once::new();
-
-/// Initialize the environment for encryption.
-#[cfg(feature = "encryption")]
-fn init() {
-    ENCRYPTION_INIT.call_once(|| {
-        sodiumoxide::init().expect("Failed to initialize encryption.");
-    });
-}
 
 /// A limit on the resources used by a key derivation function.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
@@ -44,21 +24,21 @@ pub enum ResourceLimit {
 impl ResourceLimit {
     /// Get a memory limit based on this resource limit.
     #[cfg(feature = "encryption")]
-    fn to_mem_limit(self) -> MemLimit {
+    fn to_mem_limit(self) -> u32 {
         match self {
-            ResourceLimit::Interactive => MEMLIMIT_INTERACTIVE,
-            ResourceLimit::Moderate => MEMLIMIT_MODERATE,
-            ResourceLimit::Sensitive => MEMLIMIT_SENSITIVE,
+            ResourceLimit::Interactive => 65536,
+            ResourceLimit::Moderate => 262144,
+            ResourceLimit::Sensitive => 1048576,
         }
     }
 
     /// Get an operations limit based on this resource limit.
     #[cfg(feature = "encryption")]
-    fn to_ops_limit(self) -> OpsLimit {
+    fn to_ops_limit(self) -> u32 {
         match self {
-            ResourceLimit::Interactive => OPSLIMIT_INTERACTIVE,
-            ResourceLimit::Moderate => OPSLIMIT_MODERATE,
-            ResourceLimit::Sensitive => OPSLIMIT_SENSITIVE,
+            ResourceLimit::Interactive => 2,
+            ResourceLimit::Moderate => 3,
+            ResourceLimit::Sensitive => 4,
         }
     }
 }
@@ -70,24 +50,30 @@ pub enum Encryption {
     /// Do not encrypt data.
     None,
 
-    /// Encrypt data using the XChaCha20-Poly1305 cipher.
+    /// Encrypt data using the AES-GCM-256 cipher.
     #[cfg(feature = "encryption")]
     #[cfg_attr(docsrs, doc(cfg(feature = "encryption")))]
-    XChaCha20Poly1305,
+    AesGcm256,
 }
+
+const NONCEBYTES: usize = 12;
+const KEYBYTES: usize = 32;
 
 impl Encryption {
     /// Encrypt the given `cleartext` with the given `key`.
     #[cfg(feature = "encryption")]
     pub(crate) fn encrypt(&self, cleartext: &[u8], key: &EncryptionKey) -> Vec<u8> {
-        init();
+        use aes_gcm::{aead::Aead, KeyInit};
+
         match self {
             Encryption::None => cleartext.to_vec(),
-            Encryption::XChaCha20Poly1305 => {
-                let nonce = gen_nonce();
-                let chacha_key = ChaChaKey::from_slice(key.expose_secret()).unwrap();
-                let mut ciphertext = seal(cleartext, None, &nonce, &chacha_key);
-                let mut output = nonce.as_ref().to_vec();
+            Encryption::AesGcm256 => {
+                let mut nonce = [0u8; NONCEBYTES];
+                OsRng.fill_bytes(&mut nonce);
+                let aes_nonce = aes_gcm::Nonce::from_slice(&nonce);
+                let aes_key = aes_gcm::Aes256Gcm::new_from_slice(key.expose_secret()).unwrap();
+                let mut ciphertext = aes_key.encrypt(aes_nonce, cleartext).unwrap();
+                let mut output = nonce.to_vec();
                 output.append(&mut ciphertext);
                 output
             }
@@ -103,13 +89,14 @@ impl Encryption {
     /// Decrypt the given `ciphertext` with the given `key`.
     #[cfg(feature = "encryption")]
     pub(crate) fn decrypt(&self, ciphertext: &[u8], key: &EncryptionKey) -> crate::Result<Vec<u8>> {
-        init();
+        use aes_gcm::{aead::Aead, KeyInit};
+
         match self {
             Encryption::None => Ok(ciphertext.to_vec()),
-            Encryption::XChaCha20Poly1305 => {
-                let nonce = Nonce::from_slice(&ciphertext[..NONCEBYTES]).unwrap();
-                let chacha_key = ChaChaKey::from_slice(key.expose_secret()).unwrap();
-                open(&ciphertext[NONCEBYTES..], None, &nonce, &chacha_key)
+            Encryption::AesGcm256 => {
+                let aes_nonce = aes_gcm::Nonce::from_slice(&ciphertext[..NONCEBYTES]);
+                let aes_key = aes_gcm::Aes256Gcm::new_from_slice(key.expose_secret()).unwrap();
+                aes_key.decrypt(aes_nonce,&ciphertext[NONCEBYTES..])
                     .map_err(|_| crate::Error::InvalidData)
             }
         }
@@ -132,7 +119,7 @@ impl Encryption {
         match self {
             Encryption::None => 0,
             #[cfg(feature = "encryption")]
-            Encryption::XChaCha20Poly1305 => KEYBYTES,
+            Encryption::AesGcm256 => KEYBYTES,
         }
     }
 }
@@ -153,8 +140,9 @@ impl KeySalt {
     /// Generate a new random `KeySalt`.
     #[cfg(feature = "encryption")]
     pub fn generate() -> Self {
-        init();
-        KeySalt(gen_salt().as_ref().to_vec())
+        let mut salt = [0u8; argon2::RECOMMENDED_SALT_LEN];
+        OsRng.fill_bytes(&mut salt);
+        KeySalt(salt.to_vec())
     }
 
     #[cfg(not(feature = "encryption"))]
@@ -215,16 +203,10 @@ impl EncryptionKey {
         memory: ResourceLimit,
         operations: ResourceLimit,
     ) -> Self {
-        init();
         let mut bytes = vec![0u8; size];
-        derive_key(
-            &mut bytes,
-            password,
-            &Salt::from_slice(salt.0.as_slice()).unwrap(),
-            operations.to_ops_limit(),
-            memory.to_mem_limit(),
-        )
-        .expect("Failed to derive an encryption key.");
+        let params = argon2::Params::new(memory.to_mem_limit(), operations.to_ops_limit(), 1, None).unwrap();
+        let key_stretcher = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+        key_stretcher.hash_password_into(password, salt.0.as_slice(), &mut bytes).expect("failed to derive an encryption key.");
         EncryptionKey::new(bytes)
     }
 
