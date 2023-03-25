@@ -380,3 +380,10 @@ where
         self.repo.update_context(context)
     }
 }
+
+impl <State> StateRepo<State>
+where State: Serialize + DeserializeOwned + Default {
+    pub fn destroy(&self) {
+        self.repo.destroy();
+    }
+}
