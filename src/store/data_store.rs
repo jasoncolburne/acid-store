@@ -75,7 +75,9 @@ pub trait DataStore: Send {
 assert_obj_safe!(DataStore);
 
 impl DataStore for Box<dyn DataStore> {
-    fn flush(&mut self) {}
+    fn flush(&mut self) {
+        self.as_mut().flush()
+    }
 
     fn write_block(&mut self, key: BlockKey, data: &[u8]) -> super::Result<()> {
         self.as_mut().write_block(key, data)
