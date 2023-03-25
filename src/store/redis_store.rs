@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use redis::{
     Client, Commands, Connection, ConnectionAddr, ConnectionInfo, IntoConnectionInfo,
-    RedisConnectionInfo,
+    RedisConnectionInfo
 };
 use uuid::Uuid;
 
@@ -182,5 +182,9 @@ impl DataStore for RedisStore {
             .collect::<Result<_, _>>()?;
 
         Ok(blocks)
+    }
+
+    fn flush(&mut self) {
+        redis::cmd("FLUSHDB").execute(&mut self.connection);
     }
 }

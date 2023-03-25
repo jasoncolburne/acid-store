@@ -68,11 +68,15 @@ pub trait DataStore: Send {
 
     /// Return a list of IDs of blocks of the given `kind` in the store.
     fn list_blocks(&mut self, kind: BlockType) -> super::Result<Vec<BlockId>>;
+
+    fn flush(&mut self);
 }
 
 assert_obj_safe!(DataStore);
 
 impl DataStore for Box<dyn DataStore> {
+    fn flush(&mut self) {}
+
     fn write_block(&mut self, key: BlockKey, data: &[u8]) -> super::Result<()> {
         self.as_mut().write_block(key, data)
     }

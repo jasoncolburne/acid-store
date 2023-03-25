@@ -52,6 +52,8 @@ pub struct MemoryStore {
 }
 
 impl DataStore for MemoryStore {
+    fn flush(&mut self) {}
+
     fn write_block(&mut self, key: BlockKey, data: &[u8]) -> super::Result<()> {
         let mut block_map = self.blocks.lock().unwrap();
         match key {

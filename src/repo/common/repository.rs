@@ -85,6 +85,11 @@ impl<K: Key> OpenRepo for KeyRepo<K> {
 }
 
 impl<K: Key> KeyRepo<K> {
+    pub fn destroy(&self) {
+        let state = self.state.write().unwrap();
+        state.store.lock().unwrap().flush();
+    }
+
     /// Return whether there is an object with the given `key` in this repository.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
